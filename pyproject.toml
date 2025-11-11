@@ -8,7 +8,7 @@ authors = [{name = "the p2a authors", email = "dev@1kbgz.com"}]
 description = "pydantic models to argparse CLIs"
 readme = "README.md"
 license = { text = "Apache-2.0" }
-version = "0.1.0"
+version = "0.1.1"
 requires-python = ">=3.10"
 keywords = [
     "argparse",
@@ -60,7 +60,7 @@ Repository = "https://github.com/1kbgz/p2a"
 Homepage = "https://github.com/1kbgz/p2a"
 
 [tool.bumpversion]
-current_version = "0.1.0"
+current_version = "0.1.1"
 commit = true
 tag = true
 commit_args = "-s"
