@@ -10,7 +10,14 @@ readme = "README.md"
 license = { text = "Apache-2.0" }
 version = "0.1.0"
 requires-python = ">=3.10"
-keywords = []
+keywords = [
+    "argparse",
+    "cli",
+    "command-line",
+    "pydantic",
+    "models",
+    "validation",
+]
 
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -25,7 +32,9 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 
-dependencies = []
+dependencies = [
+    "pkn>=0.3,<0.4"
+]
 
 [project.optional-dependencies]
 develop = [
@@ -85,7 +94,7 @@ exclude_also = [
     "@(abc\\.)?abstractmethod",
 ]
 ignore_errors = true
-fail_under = 50
+fail_under = 85
 
 [tool.hatch.build]
 artifacts = []
