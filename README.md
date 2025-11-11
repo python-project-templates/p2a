@@ -9,5 +9,27 @@ pydantic models to argparse CLIs
 
 ## Overview
 
+A function is provided to automatically expose fields as command line arguments.
+
+```python
+import sys
+from pydantic import BaseModel
+from p2a import parse_extra_args_model
+
+
+class MyPluginConfig(BaseModel, validate_assignment=True):
+    extra_arg: bool = False
+    extra_arg_with_value: str = "default"
+    extra_arg_literal: Literal["a", "b", "c"] = "a"
+
+
+model = MyPluginConfig()
+parse_extra_args_model(model, sys.argv)
+
+# > my-cli --extra-arg --extra-arg-with-value "test" --extra-arg-literal b
+```
+
+For integration with existing `argparse` CLIs, a helper function to create an `argparse.SubParser` is also provided: `p2a.create_model_parser`.
+
 > [!NOTE]
 > This library was generated using [copier](https://copier.readthedocs.io/en/stable/) from the [Base Python Project Template repository](https://github.com/python-project-templates/base).
