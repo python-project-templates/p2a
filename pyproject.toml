@@ -4,7 +4,7 @@ build-backend="hatchling.build"
 
 [project]
 name = "p2a"
-authors = [{name = "the p2a authors", email = "dev@1kbgz.com"}]
+authors = [{name = "the p2a authors", email = "t.paine154@gmail.com"}]
 description = "pydantic models to argparse CLIs"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -56,8 +56,8 @@ develop = [
 [project.scripts]
 
 [project.urls]
-Repository = "https://github.com/1kbgz/p2a"
-Homepage = "https://github.com/1kbgz/p2a"
+Repository = "https://github.com/python-project-templates/p2a"
+Homepage = "https://github.com/python-project-templates/p2a"
 
 [tool.bumpversion]
 current_version = "0.1.1"
