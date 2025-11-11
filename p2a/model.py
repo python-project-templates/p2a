@@ -322,9 +322,9 @@ def create_model_parser(model: "BaseModel") -> ArgumentParser:
     return parser
 
 
-def parse_extra_args_model(model: "BaseModel"):
+def parse_extra_args_model(model: "BaseModel", argv: List[str] = None) -> Union["BaseModel", Dict]:
     # Parse the extra args and update the model
-    args, kwargs = parse_extra_args(create_model_parser(model))
+    args, kwargs = parse_extra_args(create_model_parser(model), argv)
 
     for key, value in args.items():
         # Handle nested fields
