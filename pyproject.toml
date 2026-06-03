@@ -37,7 +37,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "pkn>=0.3,<0.5"
+    "pkn>=0.3,<0.6"
 ]
 
 [project.optional-dependencies]
