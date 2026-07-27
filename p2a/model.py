@@ -2,7 +2,8 @@ import sys
 from argparse import ArgumentParser
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Type, Union, get_args, get_origin
+from types import UnionType
+from typing import Literal, Union, get_args, get_origin
 
 from pkn.logging import getSimpleLogger
 
@@ -30,14 +31,14 @@ _initlog()
 
 
 def _add_argument(parser: ArgumentParser, name: str, arg_type: type, default_value, **kwargs):
-    _log.debug(f"Adding argument: {name:<75} - {str(arg_type):<10} - {str(default_value):<10}")
+    _log.debug(f"Adding argument: {name:<75} - {arg_type!s:<10} - {default_value!s:<10}")
     if "action" in kwargs:
         parser.add_argument(name, default=default_value, action=kwargs["action"])
     else:
         parser.add_argument(name, type=arg_type, default=default_value, **kwargs)
 
 
-def parse_extra_args(subparser: Optional[ArgumentParser] = None, argv: List[str] = None) -> List[str]:
+def parse_extra_args(subparser: ArgumentParser | None = None, argv: list[str] | None = None) -> list[str]:
     if subparser is None:
         subparser = ArgumentParser(prog="p2a", allow_abbrev=False)
 
@@ -46,9 +47,7 @@ def parse_extra_args(subparser: Optional[ArgumentParser] = None, argv: List[str]
 
 
 def _is_supported_type(field_type: type) -> bool:
-    if get_origin(field_type) is Optional:
-        field_type = get_args(field_type)[0]
-    elif get_origin(field_type) is Union:
+    if get_origin(field_type) in (Union, UnionType):
         non_none_types = [t for t in get_args(field_type) if t is not type(None)]
         if all(_is_supported_type(t) for t in non_none_types):
             return True
@@ -61,7 +60,7 @@ def _is_supported_type(field_type: type) -> bool:
     return field_type in (str, int, float, bool) or issubclass(field_type, Enum)
 
 
-def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", Type["BaseModel"]], prefix: str = ""):
+def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["BaseModel"]], prefix: str = ""):
     # Model is required
     if model is None:
         raise ValueError("Model instance cannot be None")  # coverage: ignore
@@ -88,9 +87,7 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", Type["
         # MARK: Wrappers:
         #  - Optional[T]
         #  - Union[T, None]
-        if get_origin(field_type) is Optional:
-            field_type = get_args(field_type)[0]
-        elif get_origin(field_type) is Union:
+        if get_origin(field_type) in (Union, UnionType):
             non_none_types = [t for t in get_args(field_type) if t is not type(None)]
             if len(non_none_types) == 1:
                 field_type = non_none_types[0]
@@ -148,7 +145,7 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", Type["
             # MARK: instance(BaseModel)
             # Nested model, add its fields with a prefix
             _recurse_add_fields(parser, field_instance, prefix=f"{field_name}.")
-        elif isinstance(field_type, Type) and issubclass(field_type, BaseModel):
+        elif isinstance(field_type, type) and issubclass(field_type, BaseModel):
             ########################
             # MARK: type(BaseModel)
             # Nested model class, add its fields with a prefix
@@ -164,7 +161,7 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", Type["
             ####################################
             # MARK: Literal[str|int|float|bool]
             _add_argument(parser=parser, name=arg_name, arg_type=type(literal_args[0]), default_value=default_value)
-        elif get_origin(field_type) in (list, List):
+        elif get_origin(field_type) in (list, list):
             ################
             # MARK: List[T]
             if get_args(field_type) and not _is_supported_type(get_args(field_type)[0]):
@@ -205,7 +202,7 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", Type["
             _add_argument(
                 parser=parser, name=arg_name, arg_type=str, default_value=",".join(map(str, default_value)) if isinstance(field, str) else None
             )
-        elif get_origin(field_type) in (dict, Dict):
+        elif get_origin(field_type) in (dict, dict):
             ######################
             # MARK: Dict[str, T]
             key_type, value_type = get_args(field_type)
@@ -322,7 +319,7 @@ def create_model_parser(model: "BaseModel") -> ArgumentParser:
     return parser
 
 
-def parse_extra_args_model(model: "BaseModel", argv: List[str] = None) -> Union["BaseModel", Dict]:
+def parse_extra_args_model(model: "BaseModel", argv: list[str] | None = None) -> Union["BaseModel", dict]:
     # Parse the extra args and update the model
     args, kwargs = parse_extra_args(create_model_parser(model), argv)
 
@@ -353,11 +350,10 @@ def parse_extra_args_model(model: "BaseModel", argv: List[str] = None) -> Union[
                     # Dict key
 
                     # If its an enum, we may need to match by name or value
-                    for k in sub_model.keys():
-                        if isinstance(k, Enum):
-                            if k.name == part or k.value == part:
-                                part = k
-                                break
+                    for k in sub_model:
+                        if isinstance(k, Enum) and (k.name == part or k.value == part):
+                            part = k
+                            break
 
                     # Should always exist, but check to be sure
                     if part not in sub_model:
@@ -375,9 +371,7 @@ def parse_extra_args_model(model: "BaseModel", argv: List[str] = None) -> Union[
                     field = sub_model.__class__.model_fields[part]
 
                     # if field annotation is an optional or union with none, extract type
-                    if get_origin(field.annotation) is Optional:
-                        model_to_instance = get_args(field.annotation)[0]
-                    elif get_origin(field.annotation) is Union:
+                    if get_origin(field.annotation) in (Union, UnionType):
                         non_none_types = [t for t in get_args(field.annotation) if t is not type(None)]
                         if len(non_none_types) == 1:
                             model_to_instance = non_none_types[0]
@@ -413,11 +407,11 @@ def parse_extra_args_model(model: "BaseModel", argv: List[str] = None) -> Union[
                 elif key.replace("_", "-") in model_to_set:
                     # Argparse converts dashes back to underscores, so undo
                     model_to_set[key.replace("_", "-")] = value
-                elif key in [k.name for k in model_to_set.keys() if isinstance(k, Enum)]:
-                    enum_key = [k for k in model_to_set.keys() if isinstance(k, Enum) and k.name == key][0]
+                elif key in [k.name for k in model_to_set if isinstance(k, Enum)]:
+                    enum_key = next(k for k in model_to_set if isinstance(k, Enum) and k.name == key)
                     model_to_set[enum_key] = value
-                elif key in [k.value for k in model_to_set.keys() if isinstance(k, Enum)]:
-                    enum_key = [k for k in model_to_set.keys() if isinstance(k, Enum) and k.value == key][0]
+                elif key in [k.value for k in model_to_set if isinstance(k, Enum)]:
+                    enum_key = next(k for k in model_to_set if isinstance(k, Enum) and k.value == key)
                     model_to_set[enum_key] = value
                 elif (
                     get_args(parent_model.__class__.model_fields[part].annotation)
@@ -469,7 +463,7 @@ def parse_extra_args_model(model: "BaseModel", argv: List[str] = None) -> Union[
             _log.debug(f"Setting field '{key}' on model '{model_to_set.__class__.__name__}' with raw value '{value}'")
 
             # Convert the value using the type adapter
-            if get_origin(field.annotation) in (list, List):
+            if get_origin(field.annotation) in (list, list):
                 if isinstance(value, list):
                     # Already a list, use as is
                     pass
@@ -479,7 +473,7 @@ def parse_extra_args_model(model: "BaseModel", argv: List[str] = None) -> Union[
                 else:
                     # Unknown, raise
                     raise ValueError(f"Cannot convert value '{value}' to list for field '{key}'")
-            elif get_origin(field.annotation) in (dict, Dict):
+            elif get_origin(field.annotation) in (dict, dict):
                 if isinstance(value, dict):
                     # Already a dict, use as is
                     pass
