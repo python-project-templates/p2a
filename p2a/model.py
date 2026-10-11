@@ -1,9 +1,10 @@
 import sys
 from argparse import ArgumentParser
 from enum import Enum
+from logging import Logger
 from pathlib import Path
 from types import UnionType
-from typing import Literal, Union, get_args, get_origin
+from typing import Any, Literal, TypeVar, Union, cast, get_args, get_origin
 
 from pkn.logging import getSimpleLogger
 
@@ -18,7 +19,8 @@ __all__ = (
     "parse_extra_args_model",
 )
 
-_log = None
+_log: Logger
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 def _initlog(level: str = "WARNING"):
@@ -38,7 +40,7 @@ def _add_argument(parser: ArgumentParser, name: str, arg_type: type, default_val
         parser.add_argument(name, type=arg_type, default=default_value, **kwargs)
 
 
-def parse_extra_args(subparser: ArgumentParser | None = None, argv: list[str] | None = None) -> list[str]:
+def parse_extra_args(subparser: ArgumentParser | None = None, argv: list[str] | None = None) -> tuple[dict[str, Any], list[str]]:
     if subparser is None:
         subparser = ArgumentParser(prog="p2a", allow_abbrev=False)
 
@@ -126,7 +128,7 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
             ########################
             # MARK: str, int, float
             try:
-                _add_argument(parser=parser, name=arg_name, arg_type=field_type, default_value=default_value)
+                _add_argument(parser=parser, name=arg_name, arg_type=cast(type, field_type), default_value=default_value)
             except TypeError:
                 # TODO: handle more complex types if needed
                 _add_argument(parser=parser, name=arg_name, arg_type=str, default_value=default_value)
@@ -200,7 +202,10 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
             #################################
             # MARK: List[str|int|float|bool]
             _add_argument(
-                parser=parser, name=arg_name, arg_type=str, default_value=",".join(map(str, default_value)) if isinstance(field, str) else None
+                parser=parser,
+                name=arg_name,
+                arg_type=str,
+                default_value=",".join(map(str, default_value)) if isinstance(default_value, list) else None,
             )
         elif get_origin(field_type) in (dict, dict):
             ######################
@@ -319,7 +324,7 @@ def create_model_parser(model: "BaseModel") -> ArgumentParser:
     return parser
 
 
-def parse_extra_args_model(model: "BaseModel", argv: list[str] | None = None) -> Union["BaseModel", dict]:
+def parse_extra_args_model(model: ModelT, argv: list[str] | None = None) -> tuple[ModelT, list[str]]:
     # Parse the extra args and update the model
     args, kwargs = parse_extra_args(create_model_parser(model), argv)
 
@@ -330,8 +335,8 @@ def parse_extra_args_model(model: "BaseModel", argv: list[str] | None = None) ->
             parts = key.split(".")
 
             # Accounting
-            sub_model = model
-            parent_model = None
+            sub_model: Any = model
+            parent_model: Any = None
 
             for i, part in enumerate(parts[:-1]):
                 if part.isdigit() and isinstance(sub_model, list):
@@ -457,7 +462,7 @@ def parse_extra_args_model(model: "BaseModel", argv: list[str] | None = None) ->
 
         # Grab the field from the model class and make a type adapter
         field = model_to_set.__class__.model_fields[key]
-        adapter = TypeAdapter(field.annotation)
+        adapter = TypeAdapter(cast(Any, field.annotation))
 
         if value is not None:
             _log.debug(f"Setting field '{key}' on model '{model_to_set.__class__.__name__}' with raw value '{value}'")
