@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from pydantic import BaseModel
 
-from p2a import parse_extra_args_model
+from p2a import create_model_parser, parse_extra_args_model
 from p2a.model import _initlog
 
 
@@ -46,7 +46,7 @@ class MyTopLevelModel(BaseModel, validate_assignment=True):
     dict_enum_key_model_value: dict[MyEnum, SubModel] = {MyEnum.OPTION_A: SubModel()}
 
     submodel: SubModel
-    submodel2: SubModel = SubModel(sub_args=84, sub_arg_with_value="predefined", sub_arg_enum=MyEnum.OPTION_B, sub_arg_literal="z")
+    submodel2: SubModel = SubModel(sub_arg=84, sub_arg_with_value="predefined", sub_arg_enum=MyEnum.OPTION_B, sub_arg_literal="z")
     submodel3: SubModel | None = None
 
     submodel_list_instanced: list[SubModel] = [SubModel()]
@@ -62,6 +62,13 @@ class MyTopLevelModel(BaseModel, validate_assignment=True):
 
 
 class TestCLIMdel:
+    def test_list_default(self):
+        class Model(BaseModel):
+            values: list[int] = [1, 2, 3]
+
+        parser = create_model_parser(Model())
+        assert parser.parse_args([]).values == "1,2,3"
+
     def test_get_arg_from_model(self):
         with (
             patch.object(
@@ -164,6 +171,7 @@ class TestCLIMdel:
         assert model.submodel2.sub_arg_enum == MyEnum.OPTION_B
         assert model.submodel2.sub_arg_literal == "z"
 
+        assert model.submodel3 is not None
         assert model.submodel3.sub_arg == 300
         assert model.submodel_list_instanced[0].sub_arg == 400
         assert model.submodel_list_instanced[0].sub_arg_with_value == "list_value"
