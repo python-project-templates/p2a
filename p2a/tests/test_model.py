@@ -179,6 +179,39 @@ class TestCLIMdel:
         assert model.submodel_list_instanced[0].sub_arg_literal == "z"
         assert model.submodel_dict_instanced["a"].sub_arg == 500
 
+        # No argument targets a field p2a cannot expose, so nothing is warned about
+        assert "[p2a][WARNING]" not in mock_stderr.getvalue()
+
+    def test_unsupported_fields_warn_only_when_passed(self):
+        class Model(BaseModel):
+            unsupported_literal: Literal[b"test"] = b"test"
+            unsupported_dict: dict[SubModel, str] = {}
+            unsupported_dict_mixed_types: dict[str, str | SubModel] = {}
+            unsupported_random_type: set | None = None
+            unsupported_submodel_list: list[SubModel] = []
+            unsupported_submodel_dict: dict[str, SubModel] = {}
+
+        argv = [
+            "--unsupported-submodel-list.0.sub-arg",
+            "1",
+            "--unsupported-submodel-dict.a.sub-arg=1",
+            "--unsupported-literal",
+            "x",
+            "--unsupported-dict",
+            "a=b",
+            "--unsupported-dict-mixed-types",
+            "a=b",
+            "--unsupported-random-type",
+            "x",
+        ]
+        with patch("sys.stderr", new_callable=StringIO) as mock_stderr:
+            _initlog("WARNING")
+            parse_extra_args_model(Model(), [])
+            assert "[p2a][WARNING]" not in mock_stderr.getvalue()
+
+            _, extras = parse_extra_args_model(Model(), argv)
+
+        assert extras == argv
         stderr = mock_stderr.getvalue()
         for text in (
             "[p2a][WARNING]: Only lists of str, int, float, or bool are supported - field `unsupported_submodel_list` got <class 'test_model.SubModel'>",
@@ -190,8 +223,28 @@ class TestCLIMdel:
         ):
             assert text in stderr
             stderr = stderr.replace(text, "")
-        if "[p2a][WARNING]" in stderr.strip():
-            for line in stderr.strip().splitlines():
-                if "[p2a][WARNING]" in line:
-                    print("UNEXPECTED WARNING:", line)
-            assert False
+        assert "[p2a][WARNING]" not in stderr
+
+    def test_list_of_paths(self):
+        class Model(BaseModel, validate_assignment=True):
+            paths: list[Path] = []
+
+        model, _ = parse_extra_args_model(Model(), ["--paths", "include/a.h,include/b.h"])
+        assert model.paths == [Path("include/a.h"), Path("include/b.h")]
+
+    def test_only_passed_arguments_are_applied(self):
+        class Model(BaseModel, validate_assignment=True):
+            values: list[int] = [1, 2, 3]
+            flag: bool = True
+            flags: dict[str, str | int | float | bool] | None = None
+            submodel: SubModel | None = None
+
+        with patch("sys.stderr", new_callable=StringIO) as mock_stderr:
+            _initlog("WARNING")
+            model, _ = parse_extra_args_model(Model(flag=False, flags={"enabled": True}), ["--values.0", "9"])
+
+        assert model.values == [9, 2, 3]
+        assert model.flag is False
+        assert model.flags == {"enabled": True}
+        assert model.submodel is None
+        assert "[p2a][WARNING]" not in mock_stderr.getvalue()
