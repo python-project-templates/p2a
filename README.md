@@ -31,5 +31,7 @@ parse_extra_args_model(model, sys.argv)
 
 For integration with existing `argparse` CLIs, a helper function to create an `argparse.SubParser` is also provided: `p2a.create_model_parser`.
 
+Fields with types that cannot be mapped to arguments are skipped. `parse_extra_args_model` warns about a skipped field only when an argument for it is passed.
+
 > [!NOTE]
 > This library was generated using [copier](https://copier.readthedocs.io/en/stable/) from the [Base Python Project Template repository](https://github.com/python-project-templates/base).

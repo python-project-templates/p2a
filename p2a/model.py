@@ -1,5 +1,5 @@
 import sys
-from argparse import ArgumentParser
+from argparse import SUPPRESS, ArgumentParser
 from enum import Enum
 from logging import Logger
 from pathlib import Path
@@ -34,6 +34,9 @@ _initlog()
 
 def _add_argument(parser: ArgumentParser, name: str, arg_type: type, default_value, **kwargs):
     _log.debug(f"Adding argument: {name:<75} - {arg_type!s:<10} - {default_value!s:<10}")
+    if parser.argument_default is SUPPRESS:
+        # Leave unpassed arguments out of the parsed result
+        default_value = SUPPRESS
     if "action" in kwargs:
         parser.add_argument(name, default=default_value, action=kwargs["action"])
     else:
@@ -59,13 +62,25 @@ def _is_supported_type(field_type: type) -> bool:
         return all(isinstance(arg, (str, int, float, bool, Enum)) for arg in get_args(field_type))
     if not isinstance(field_type, type):
         return False
-    return field_type in (str, int, float, bool) or issubclass(field_type, Enum)
+    return field_type in (str, int, float, bool) or issubclass(field_type, (Enum, Path))
 
 
-def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["BaseModel"]], prefix: str = ""):
+def _skip_field(unsupported: dict[str, str], arg_name: str, message: str):
+    # Remember why a field has no argument, so we can warn if one is passed for it
+    _log.debug(message)
+    unsupported[arg_name] = message
+
+
+def _recurse_add_fields(
+    parser: ArgumentParser, model: Union["BaseModel", type["BaseModel"]], prefix: str = "", unsupported: dict[str, str] | None = None
+):
     # Model is required
     if model is None:
         raise ValueError("Model instance cannot be None")  # coverage: ignore
+
+    # Fields we cannot expose, by argument name
+    if unsupported is None:
+        unsupported = {}
 
     # Extract the fields from a model instance or class
     if isinstance(model, type):
@@ -94,7 +109,7 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
             if len(non_none_types) == 1:
                 field_type = non_none_types[0]
             else:
-                _log.warning(f"Unsupported Union type for argument '{field_name}': {field_type}")
+                _skip_field(unsupported, arg_name, f"Unsupported Union type for argument '{field_name}': {field_type}")
                 continue
 
         # Default value, promote PydanticUndefined to None
@@ -146,19 +161,21 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
             ############################
             # MARK: instance(BaseModel)
             # Nested model, add its fields with a prefix
-            _recurse_add_fields(parser, field_instance, prefix=f"{field_name}.")
+            _recurse_add_fields(parser, field_instance, prefix=f"{field_name}.", unsupported=unsupported)
         elif isinstance(field_type, type) and issubclass(field_type, BaseModel):
             ########################
             # MARK: type(BaseModel)
             # Nested model class, add its fields with a prefix
-            _recurse_add_fields(parser, field_type, prefix=f"{field_name}.")
+            _recurse_add_fields(parser, field_type, prefix=f"{field_name}.", unsupported=unsupported)
         elif get_origin(field_type) is Literal:
             ################
             # MARK: Literal
             literal_args = get_args(field_type)
             if not all(isinstance(arg, (str, int, float, bool, Enum)) for arg in literal_args):
                 # Only support simple literal types for now
-                _log.warning(f"Only Literal types of str, int, float, or bool are supported - field `{field_name}` got {literal_args}")
+                _skip_field(
+                    unsupported, arg_name, f"Only Literal types of str, int, float, or bool are supported - field `{field_name}` got {literal_args}"
+                )
                 continue
             ####################################
             # MARK: Literal[str|int|float|bool]
@@ -173,7 +190,7 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
                         if isinstance(value, BaseModel):
                             ########################
                             # MARK: List[BaseModel]
-                            _recurse_add_fields(parser, value, prefix=f"{field_name}.{i}.")
+                            _recurse_add_fields(parser, value, prefix=f"{field_name}.{i}.", unsupported=unsupported)
                             continue
                         else:
                             ########################
@@ -187,7 +204,11 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
                     continue
                 # If there's nothing here, we don't know how to address them
                 # TODO: we could just prefill e.g. --field.0, --field.1 up to some limit
-                _log.warning(f"Only lists of str, int, float, or bool are supported - field `{field_name}` got {get_args(field_type)[0]}")
+                _skip_field(
+                    unsupported,
+                    arg_name,
+                    f"Only lists of str, int, float, or bool are supported - field `{field_name}` got {get_args(field_type)[0]}",
+                )
                 continue
             if field_instance:
                 for i, value in enumerate(field_instance):
@@ -214,7 +235,11 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
 
             if not _is_supported_type(key_type):
                 # Check Key type, must be str, int, float, bool, enum
-                _log.warning(f"Only dicts with str, int, float, bool, or enum keys are supported - field `{field_name}` got key type {key_type}")
+                _skip_field(
+                    unsupported,
+                    arg_name,
+                    f"Only dicts with str, int, float, bool, or enum keys are supported - field `{field_name}` got key type {key_type}",
+                )
                 continue
 
             if isinstance(key_type, type) and issubclass(key_type, Enum):
@@ -222,8 +247,10 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
 
                 if not _is_supported_type(value_type) and not (isinstance(value_type, type) and issubclass(value_type, BaseModel)):
                     # Unsupported value type
-                    _log.warning(
-                        f"Only dicts with str, int, float, bool, enum, or BaseModel values are supported - field `{field_name}` got value type {value_type}"
+                    _skip_field(
+                        unsupported,
+                        arg_name,
+                        f"Only dicts with str, int, float, bool, enum, or BaseModel values are supported - field `{field_name}` got value type {value_type}",
                     )
                     continue
 
@@ -234,8 +261,15 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
                     for enum_key in key_type:
                         if not field_instance or enum_key not in field_instance:
                             continue
-                        _recurse_add_fields(parser, (field_instance or {}).get(enum_key, value_type), prefix=f"{field_name}.{enum_key.name}.")
-                        _recurse_add_fields(parser, (field_instance or {}).get(enum_key, value_type), prefix=f"{field_name}.{enum_key.value}.")
+                        _recurse_add_fields(
+                            parser, (field_instance or {}).get(enum_key, value_type), prefix=f"{field_name}.{enum_key.name}.", unsupported=unsupported
+                        )
+                        _recurse_add_fields(
+                            parser,
+                            (field_instance or {}).get(enum_key, value_type),
+                            prefix=f"{field_name}.{enum_key.value}.",
+                            unsupported=unsupported,
+                        )
 
                 elif _is_supported_type(value_type):
                     # Add directly
@@ -259,8 +293,10 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
 
             if not _is_supported_type(value_type) and not field_instance:
                 # Check Value type, must be str, int, float, bool if an instance isnt provided
-                _log.warning(
-                    f"Only dicts with str, int, float, bool, or enum values are supported - field `{field_name}` got value type {value_type}"
+                _skip_field(
+                    unsupported,
+                    arg_name,
+                    f"Only dicts with str, int, float, bool, or enum values are supported - field `{field_name}` got value type {value_type}",
                 )
                 continue
 
@@ -273,12 +309,16 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
                         if isinstance(key, Enum):
                             # Already handled above
                             continue
-                        _recurse_add_fields(parser, value, prefix=f"{field_name}.{key}.")
+                        _recurse_add_fields(parser, value, prefix=f"{field_name}.{key}.", unsupported=unsupported)
                     continue
 
                 # If we have mixed, we don't support
                 elif any(isinstance(v, BaseModel) for v in field_instance.values()):
-                    _log.warning(f"Mixed dict value types are not supported - field `{field_name}` has mixed BaseModel and non-BaseModel values")
+                    _skip_field(
+                        unsupported,
+                        arg_name,
+                        f"Mixed dict value types are not supported - field `{field_name}` has mixed BaseModel and non-BaseModel values",
+                    )
                     continue
 
                 # If we have non BaseModel values, we can still add a parser by route
@@ -312,21 +352,37 @@ def _recurse_add_fields(parser: ArgumentParser, model: Union["BaseModel", type["
                     defaults.append(f"{k}={v}")
             _add_argument(parser=parser, name=arg_name, arg_type=str, default_value=",".join(defaults) if defaults else None)
         else:
-            _log.warning(f"Unsupported field type for argument '{field_name}': {field_type}")
+            _skip_field(unsupported, arg_name, f"Unsupported field type for argument '{field_name}': {field_type}")
     return parser
+
+
+def _create_model_parser(model: "BaseModel", argument_default: Any = None) -> tuple[ArgumentParser, dict[str, str]]:
+    # Recursively parse fields from a pydantic model and its sub-models
+    # and create an argument parser to parse extra args
+    parser = ArgumentParser(prog="hatch-build-extras-model", allow_abbrev=False, argument_default=argument_default)
+    unsupported: dict[str, str] = {}
+    _recurse_add_fields(parser, model, unsupported=unsupported)
+    return parser, unsupported
 
 
 def create_model_parser(model: "BaseModel") -> ArgumentParser:
-    # Recursively parse fields from a pydantic model and its sub-models
-    # and create an argument parser to parse extra args
-    parser = ArgumentParser(prog="hatch-build-extras-model", allow_abbrev=False)
-    parser = _recurse_add_fields(parser, model)
-    return parser
+    return _create_model_parser(model)[0]
+
+
+def _warn_unsupported(unsupported: dict[str, str], extras: list[str]):
+    # Warn only about fields the caller tried to set
+    passed = {extra.split("=", 1)[0] for extra in extras if extra.startswith("--")}
+    for arg_name, message in unsupported.items():
+        if any(name == arg_name or name.startswith(f"{arg_name}.") for name in passed):
+            _log.warning(message)
 
 
 def parse_extra_args_model(model: ModelT, argv: list[str] | None = None) -> tuple[ModelT, list[str]]:
     # Parse the extra args and update the model
-    args, kwargs = parse_extra_args(create_model_parser(model), argv)
+    # Apply only the arguments that were passed. The model already holds every default.
+    parser, unsupported = _create_model_parser(model, argument_default=SUPPRESS)
+    args, kwargs = parse_extra_args(parser, argv)
+    _warn_unsupported(unsupported, kwargs)
 
     for key, value in args.items():
         # Handle nested fields
